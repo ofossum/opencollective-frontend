@@ -1,6 +1,9 @@
 import React, { Fragment } from 'react';
 import PropTypes from 'prop-types';
 import { graphql } from '@apollo/client/react/hoc';
+import css from '@styled-system/css';
+import { uniqBy } from 'lodash';
+import memoizeOne from 'memoize-one';
 import { defineMessages, FormattedMessage, injectIntl } from 'react-intl';
 import styled from 'styled-components';
 
@@ -8,18 +11,21 @@ import { generateNotFoundError } from '../lib/errors';
 import { API_V2_CONTEXT } from '../lib/graphql/helpers';
 
 import AuthenticatedPage from '../components/AuthenticatedPage';
+import Avatar from '../components/Avatar';
 import CollectiveNavbar from '../components/collective-navbar';
 import { Dimensions } from '../components/collective-page/_constants';
 import SectionTitle from '../components/collective-page/SectionTitle';
 import Container from '../components/Container';
 import ErrorPage from '../components/ErrorPage';
-import { Box } from '../components/Grid';
+import { Box, Grid } from '../components/Grid';
+import Link from '../components/Link';
 import Loading from '../components/Loading';
 import { recurringContributionsQuery } from '../components/recurring-contributions/graphql/queries';
 import RecurringContributionsContainer from '../components/recurring-contributions/RecurringContributionsContainer';
 import SignInOrJoinFree from '../components/SignInOrJoinFree';
 import StyledFilters from '../components/StyledFilters';
-import { P } from '../components/Text';
+import StyledTag from '../components/StyledTag';
+import { P, Span } from '../components/Text';
 import { withUser } from '../components/UserProvider';
 
 const MainContainer = styled(Container)`
@@ -33,6 +39,7 @@ const FILTERS = {
   YEARLY: 'YEARLY',
   CANCELLED: 'CANCELLED',
 };
+
 const I18nFilters = defineMessages({
   [FILTERS.ACTIVE]: {
     id: 'Subscriptions.Active',
@@ -51,6 +58,32 @@ const I18nFilters = defineMessages({
     defaultMessage: 'Cancelled',
   },
 });
+
+const MenuEntry = styled(Link)`
+  display: flex;
+  align-items: center;
+  background: white;
+  padding: 16px;
+  cursor: pointer;
+  background: none;
+  color: inherit;
+  border: none;
+  font: inherit;
+  outline: inherit;
+  width: 100%;
+  text-align: left;
+
+  ${props =>
+    props.$isActive &&
+    css({
+      fontWeight: 800,
+      bgColor: 'primary.500',
+    })}
+
+  &:hover {
+    background: #f9f9f9;
+  }
+`;
 
 class recurringContributionsPage extends React.Component {
   static getInitialProps({ query: { slug } }) {
@@ -74,6 +107,13 @@ class recurringContributionsPage extends React.Component {
     this.state = { filter: 'ACTIVE' };
   }
 
+  getAdministratedAccounts = memoizeOne(loggedInUser => {
+    return uniqBy(
+      loggedInUser?.memberOf?.filter(m => m.role === 'ADMIN' && !m.collective.isIncognito),
+      'collective.id',
+    );
+  });
+
   render() {
     const { slug, data, intl, loadingLoggedInUser, LoggedInUser } = this.props;
 
@@ -90,6 +130,7 @@ class recurringContributionsPage extends React.Component {
     const collective = data && data.account;
     const canEditCollective = LoggedInUser && LoggedInUser.canEditCollective(collective);
     const recurringContributions = collective && collective.orders;
+    const adminOf = this.getAdministratedAccounts(LoggedInUser);
     return (
       <AuthenticatedPage>
         {data?.loading || loadingLoggedInUser ? (
@@ -98,7 +139,7 @@ class recurringContributionsPage extends React.Component {
           </Container>
         ) : (
           <Fragment>
-            {!canEditCollective && (
+            {!canEditCollective ? (
               <Container p={4}>
                 <P p={2} fontSize="16px" textAlign="center">
                   <FormattedMessage
@@ -108,29 +149,56 @@ class recurringContributionsPage extends React.Component {
                 </P>
                 <SignInOrJoinFree />
               </Container>
-            )}
-            {canEditCollective && (
+            ) : (
               <Container>
                 <CollectiveNavbar collective={collective} />
                 <MainContainer py={[3, 4]} px={[2, 3, 4]}>
                   <SectionTitle textAlign="left" mb={1}>
                     <FormattedMessage id="Subscriptions.Title" defaultMessage="Recurring contributions" />
                   </SectionTitle>
-                  <Box mt={4} mx="auto">
-                    <StyledFilters
-                      filters={filters}
-                      getLabel={key => intl.formatMessage(I18nFilters[key])}
-                      selected={this.state.filter}
-                      justifyContent="left"
-                      minButtonWidth={175}
-                      onChange={filter => this.setState({ filter: filter })}
-                    />
-                  </Box>
-                  <RecurringContributionsContainer
-                    recurringContributions={recurringContributions}
-                    account={collective}
-                    filter={this.state.filter}
-                  />
+                  <Grid gridTemplateColumns={['1fr', '250px 1fr']} gridGap={32} mt={4}>
+                    <div>
+                      <MenuEntry href="/recurring-contributions" $isActive={!slug} onClick={() => {}}>
+                        <Avatar collective={LoggedInUser.collective} size={32} />
+                        <Span ml={3}>
+                          <FormattedMessage id="ContributionFlow.PersonalProfile" defaultMessage="Personal profile" />
+                        </Span>
+                      </MenuEntry>
+                      {adminOf.map(m => (
+                        <MenuEntry
+                          key={m.id}
+                          href={`/${m.collective.slug}/recurring-contributions`}
+                          title={m.collective.name}
+                          $isActive={slug === m.collective.slug}
+                        >
+                          <Avatar collective={m.collective} size={32} />
+                          <Span ml={3} truncateOverflow>
+                            {m.collective.name}
+                          </Span>
+                          <StyledTag ml={2} borderRadius={32}>
+                            {Math.floor(Math.random() * 13)}
+                          </StyledTag>
+                        </MenuEntry>
+                      ))}
+                    </div>
+                    <Box>
+                      <Box mx="auto">
+                        <StyledFilters
+                          filters={filters}
+                          getLabel={key => intl.formatMessage(I18nFilters[key])}
+                          selected={this.state.filter}
+                          justifyContent="left"
+                          minButtonWidth={175}
+                          onChange={filter => this.setState({ filter: filter })}
+                        />
+                      </Box>
+                      <RecurringContributionsContainer
+                        recurringContributions={recurringContributions}
+                        account={collective}
+                        filter={this.state.filter}
+                      />
+                    </Box>
+                  </Grid>
                 </MainContainer>
               </Container>
             )}
